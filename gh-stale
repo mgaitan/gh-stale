@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import shlex
+import subprocess
+from datetime import datetime, timedelta
+
+
+# Function to run shell commands safely
+def run_command(command):
+    process = subprocess.run(shlex.split(command), text=True, capture_output=True)
+    return process.stdout.strip()
+
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description="List or close stale PRs using GitHub CLI with search filters.")
+parser.add_argument("-d", "--days", type=int, default=30, help="Number of days to consider a PR stale (default: 30).")
+parser.add_argument(
+    "-r",
+    "--repo",
+    type=str,
+    default=None,
+    help="Specify the repository in 'owner/repo' format (default: current repository).",
+)
+parser.add_argument("--close", action="store_true", help="Close the listed PRs instead of listing them.")
+
+args = parser.parse_args()
+
+# Determine the repository
+if not args.repo:
+    repo_command = "gh repo view --json nameWithOwner -q .nameWithOwner"
+    args.repo = run_command(repo_command)
+
+# Calculate the since date
+since_date = (datetime.now() - timedelta(days=args.days)).strftime("%Y-%m-%d")
+
+# Construct the search query
+search_query = f"updated:<={since_date}"
+list_command = f'gh pr list --repo {args.repo} -s open --json number,title,url,state,updatedAt --search "{search_query}"'
+
+pr_list_json = json.loads(run_command(list_command))
+
+for pr in pr_list_json:
+    pr_updated_at = datetime.strptime(pr['updatedAt'], '%Y-%m-%dT%H:%M:%SZ')
+    days_stale = (datetime.now() - pr_updated_at).days
+
+    if args.close:
+        print(f"Closing PR #{pr['number']} '{pr['title']}'...")
+        close_command = f"gh pr close {pr['number']} --repo {args.repo}"
+        run_command(close_command)
+    else:
+        print(f"PR #{pr['number']} '{pr['title']}' has been stale for {days_stale} days. URL: {pr['url']}")
+
